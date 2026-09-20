@@ -96,13 +96,21 @@ HELP_BUTTONS = [
 ]
 
 
+def add_section(key: str, label: str, text: str) -> None:
+    """Let a feature module add its own help section and menu button."""
+    SECTIONS[key] = text
+    if all(k != key for _, k in HELP_BUTTONS):
+        HELP_BUTTONS.append((label, key))
+
+
 def _help_keyboard() -> InlineKeyboardMarkup:
-    rows = []
+    buttons = []
     for label, key in HELP_BUTTONS:
         if key in SECTIONS:
-            rows.append([InlineKeyboardButton(label, callback_data=f"ui:{key}")])
+            buttons.append(InlineKeyboardButton(label, callback_data=f"ui:{key}"))
         else:
-            rows.append([InlineKeyboardButton(f"{label} 🚧", callback_data="ui:soon")])
+            buttons.append(InlineKeyboardButton(f"{label} 🚧", callback_data="ui:soon"))
+    rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
     rows.append(
         [
             InlineKeyboardButton("⬅️ Back", callback_data="ui:home"),

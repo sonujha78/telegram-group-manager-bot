@@ -11,6 +11,7 @@ from telegram.error import TelegramError
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 import db
+import logs
 import ui
 import utils
 from utils import is_admin, parse_duration, require_admin, resolve_target, say
@@ -144,6 +145,7 @@ async def promote_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     except TelegramError as e:
         await _fail(update, e, "I need the <b>Add new admins</b> permission myself.")
         return
+    await logs.log_action(update, context, "PROMOTE", mention)
     await say(update, f"⭐ {mention} is now an admin.")
 
 
@@ -171,6 +173,7 @@ async def demote_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     except TelegramError as e:
         await _fail(update, e, "I can only demote admins that I promoted myself.")
         return
+    await logs.log_action(update, context, "DEMOTE", mention)
     await say(update, f"⬇️ {mention} is no longer an admin.")
 
 
@@ -235,6 +238,7 @@ async def purge_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except TelegramError as e:
         await _fail(update, e, "I need the <b>Delete messages</b> permission. Telegram only lets bots delete messages newer than 48 hours.")
         return
+    await logs.log_action(update, context, "PURGE", None, f"{len(ids)} messages")
     await _temp_notice(context, chat_id, "🧹 Purge complete.")
 
 
@@ -267,6 +271,7 @@ async def tban_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except TelegramError as e:
         await _fail(update, e, "I need the <b>Ban users</b> permission.")
         return
+    await logs.log_action(update, context, "TBAN", mention, f"{label} {reason}".strip())
     await say(update, f"⏳ {mention} is banned for {html.escape(label)}." + (f"\nReason: {html.escape(reason)}" if reason else ""))
 
 
@@ -286,6 +291,7 @@ async def dban_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     except TelegramError as e:
         await _fail(update, e, "I need the <b>Delete messages</b> and <b>Ban users</b> permissions.")
         return
+    await logs.log_action(update, context, "DBAN", mention)
     await say(update, f"🔨 {mention} was banned and their message deleted.")
 
 

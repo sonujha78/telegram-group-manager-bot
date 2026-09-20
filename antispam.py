@@ -22,7 +22,9 @@ from telegram.ext import (
 )
 
 import db
+import logs
 import ui
+import warnsys
 from utils import is_exempt, require_admin, say
 
 log = logging.getLogger("groupbot.antispam")
@@ -187,15 +189,7 @@ async def _punish(context: ContextTypes.DEFAULT_TYPE, chat, user, action: str, r
     reason = html.escape(reason)
     try:
         if action == "warn":
-            key = (chat.id, user.id)
-            warns[key] += 1
-            count = warns[key]
-            if count >= MAX_WARNS:
-                await context.bot.ban_chat_member(chat.id, user.id)
-                warns.pop(key, None)
-                text = f"🔨 {mention} was banned after {MAX_WARNS} warnings ({reason})."
-            else:
-                text = f"⚠️ {mention} was warned ({count}/{MAX_WARNS}): {reason}."
+            text, _, _, _ = await warnsys.add_warn(context, chat.id, user.id, mention, reason)
         elif action == "mute":
             until = datetime.now(timezone.utc) + timedelta(minutes=MUTE_MINUTES)
             await context.bot.restrict_chat_member(chat.id, user.id, ChatPermissions.no_permissions(), until_date=until)
@@ -211,6 +205,7 @@ async def _punish(context: ContextTypes.DEFAULT_TYPE, chat, user, action: str, r
         log.warning("Could not apply '%s' to %s in %s: %s", action, user.id, chat.id, e)
         return
     await _notice(context, chat.id, text)
+    await logs.log_event(context, chat, f"🛡 <b>{html.escape(chat.title or 'group')}</b>\n#ANTISPAM {action}\n<b>User:</b> {mention}\n<b>Reason:</b> {reason}")
 
 
 # ------------------------------------------------------- message watcher
