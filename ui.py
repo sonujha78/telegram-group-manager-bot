@@ -76,6 +76,7 @@ def _home_keyboard(username: str) -> InlineKeyboardMarkup:
     row.append(InlineKeyboardButton("💬 Information", callback_data="ui:info"))
     rows.append(row)
     rows.append([InlineKeyboardButton("🌐 Languages 🌐", callback_data="ui:lang")])
+    rows.append([InlineKeyboardButton("❌ Close", callback_data="ui:close")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -88,6 +89,10 @@ HELP_BUTTONS = [
     ("👋 Welcome & Rules", "welcome"),
     ("🛡 Anti-Spam", "antispam"),
     ("📝 Notes & Filters", "notes"),
+    ("🔒 Locks", "locks"),
+    ("🛠 Admin Tools", "admin"),
+    ("✅ Approval & Reports", "approval"),
+    ("ℹ️ Misc", "misc"),
 ]
 
 
@@ -98,7 +103,12 @@ def _help_keyboard() -> InlineKeyboardMarkup:
             rows.append([InlineKeyboardButton(label, callback_data=f"ui:{key}")])
         else:
             rows.append([InlineKeyboardButton(f"{label} 🚧", callback_data="ui:soon")])
-    rows.append([InlineKeyboardButton("⬅️ Back", callback_data="ui:home")])
+    rows.append(
+        [
+            InlineKeyboardButton("⬅️ Back", callback_data="ui:home"),
+            InlineKeyboardButton("❌ Close", callback_data="ui:close"),
+        ]
+    )
     return InlineKeyboardMarkup(rows)
 
 
@@ -153,6 +163,13 @@ async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     if key == "soon":
         await q.answer("Coming soon 🚧", show_alert=True)
+        return
+    if key == "close":
+        await q.answer()
+        try:
+            await q.message.delete()
+        except BadRequest:
+            pass
         return
     screen = _screen(key, context.bot)
     if screen is None:

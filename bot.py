@@ -19,8 +19,10 @@ from telegram.constants import ChatMemberStatus, ChatType, ParseMode
 from telegram.error import TelegramError
 from telegram.ext import Application, CommandHandler, ContextTypes
 
+import admin
 import antispam
 import db
+import locks
 import notes
 import ui
 import welcome
@@ -286,6 +288,8 @@ def main() -> None:
     welcome.register(app)
     antispam.register(app)
     notes.register(app)
+    locks.register(app)
+    admin.register(app)
     app.add_handler(CommandHandler("ban", ban))
     app.add_handler(CommandHandler("unban", unban))
     app.add_handler(CommandHandler("kick", kick))

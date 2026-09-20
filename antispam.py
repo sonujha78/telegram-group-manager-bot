@@ -23,7 +23,7 @@ from telegram.ext import (
 
 import db
 import ui
-from utils import is_admin, require_admin, say
+from utils import is_exempt, require_admin, say
 
 log = logging.getLogger("groupbot.antispam")
 
@@ -249,7 +249,7 @@ async def on_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
                 violation = (cfg.get("link_action", "delete"), "links are not allowed", [msg.message_id])
     if violation is None:
         return
-    if await is_admin(context, chat.id, user.id):  # only checked on a violation (saves API calls)
+    if await is_exempt(context, chat.id, user.id):  # only checked on a violation (saves API calls)
         return
     action, reason, ids = violation
     await _punish(context, chat, user, action, reason, ids)
