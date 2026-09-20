@@ -270,7 +270,16 @@ def main() -> None:
     if not TOKEN:
         raise SystemExit("BOT_TOKEN not found. Add BOT_TOKEN=... to your .env file.")
 
-    app = Application.builder().token(TOKEN).post_init(post_init).build()
+    app = (
+        Application.builder()
+        .token(TOKEN)
+        .post_init(post_init)
+        .connect_timeout(20)
+        .read_timeout(20)
+        .write_timeout(20)
+        .pool_timeout(20)
+        .build()
+    )
     ui.register(app)
     welcome.register(app)
     app.add_handler(CommandHandler("ban", ban))
@@ -284,7 +293,7 @@ def main() -> None:
     app.add_error_handler(on_error)
 
     log.info("Bot started...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    app.run_polling(allowed_updates=Update.ALL_TYPES, bootstrap_retries=-1)
 
 
 if __name__ == "__main__":
