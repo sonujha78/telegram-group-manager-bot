@@ -1,2 +1,2 @@
-python-telegram-bot>=21.6,<23
+python-telegram-bot[job-queue]>=21.6,<23
 python-dotenv>=1.0
