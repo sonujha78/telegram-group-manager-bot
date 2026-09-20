@@ -50,7 +50,9 @@ def _info_text(bot_name: str) -> str:
         "ℹ️ <b>Information</b>\n\n"
         f"<b>{bot_name}</b> helps you keep your group clean and safe.\n\n"
         "• Moderation: ban, kick, mute, warn\n"
-        "• More features (welcome, anti-spam, filters) are on the way\n\n"
+        "• Welcome, goodbye, rules and join captcha\n"
+        "• Anti-spam: flood, links, banned words\n"
+        "• Notes and filters\n\n"
         "Add me to a supergroup, make me admin, and use /help for the full command list."
     )
 
