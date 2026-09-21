@@ -1,8 +1,8 @@
 """
-Notes and filters.
-Notes: saved text or media that members fetch with /get name or #name.
+Notes and filters (formatted text, media and buttons).
+Notes: saved content that members fetch with /get name or #name.
 Filters: keywords the bot answers automatically.
-Everything is stored per group in SQLite.
+Everything is stored per group in SQLite. See fmt.py for the formatting.
 """
 import html
 import logging
@@ -15,9 +15,9 @@ from telegram.error import BadRequest, TelegramError
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 import db
+import fmt
 import ui
 from utils import reply_target_gone, require_admin, say
-from welcome import render
 
 log = logging.getLogger("groupbot.notes")
 
@@ -51,6 +51,7 @@ NOTES_HELP = (
     "/filters - list all filters\n"
     "/stop [keyword] - remove a filter\n\n"
     "Saving and removing is for admins. Everyone can use /get, #name, /notes and /filters.\n"
+    "Text can be formatted and can have buttons: see the ✨ Formatting section of /help.\n"
     "Placeholders: {first} {mention} {group}\n"
     "English keywords match as whole words; other languages and phrases match anywhere in the text."
 )
@@ -60,43 +61,58 @@ _last_answer: dict[tuple[int, str], float] = {}
 
 # ---------------------------------------------------------------- helpers
 def _extract(msg):
-    """(kind, file_id, text) of a message: text, photo, sticker, animation, video, voice, audio or document."""
-    caption = msg.caption or ""
+    """(kind, file_id, template) of a message: text, photo, sticker, animation, video, voice, audio or document."""
+    template = fmt.capture(fmt.message_html(msg))
     if msg.photo:
-        return "photo", msg.photo[-1].file_id, caption
+        return "photo", msg.photo[-1].file_id, template
     if msg.sticker:
         return "sticker", msg.sticker.file_id, ""
     if msg.animation:  # must be checked before document (GIFs are documents too)
-        return "animation", msg.animation.file_id, caption
+        return "animation", msg.animation.file_id, template
     if msg.video:
-        return "video", msg.video.file_id, caption
+        return "video", msg.video.file_id, template
     if msg.voice:
-        return "voice", msg.voice.file_id, caption
+        return "voice", msg.voice.file_id, template
     if msg.audio:
-        return "audio", msg.audio.file_id, caption
+        return "audio", msg.audio.file_id, template
     if msg.document:
-        return "document", msg.document.file_id, caption
-    return "text", "", msg.text or ""
+        return "document", msg.document.file_id, template
+    return "text", "", template
 
 
-def _rest(msg) -> str:
-    """Everything after the command word (newlines are kept)."""
-    parts = (msg.text or "").split(maxsplit=1)
-    return parts[1].strip() if len(parts) == 2 else ""
+def _after_command(msg):
+    """(plain text, index of the first character after the command word)."""
+    plain = msg.text or ""
+    m = re.match(r"\S+\s*", plain)
+    return plain, (m.end() if m else len(plain))
 
 
-def _parse_keyword(raw: str):
-    """'"good morning" hi' -> ('good morning', 'hi');  'hello hi there' -> ('hello', 'hi there')."""
-    raw = raw.replace("“", '"').replace("”", '"').strip()
+def _inline_html(msg, plain: str, start: int) -> str:
+    return fmt.to_html(plain, msg.entities, start) if plain[start:].strip() else ""
+
+
+def _parse_name(msg):
+    """'/save name some *text*' -> ('name', html of 'some *text*')."""
+    plain, start = _after_command(msg)
+    m = re.match(r"(\S+)\s*", plain[start:])
+    if not m:
+        return "", ""
+    return m.group(1).lower().lstrip("#"), _inline_html(msg, plain, start + m.end())
+
+
+def _parse_keyword(msg):
+    """'/filter "good morning" hi' -> ('good morning', html of 'hi');  '/filter hello hi there' -> ('hello', html of 'hi there')."""
+    plain, start = _after_command(msg)
+    raw = plain[start:].replace("“", '"').replace("”", '"')  # same length, so the indexes stay valid
     if raw.startswith('"'):
         end = raw.find('"', 1)
         if end == -1:
             return None, ""
-        return raw[1:end].strip().lower() or None, raw[end + 1 :].strip()
-    parts = raw.split(maxsplit=1)
-    if not parts:
+        return (raw[1:end].strip().lower() or None), _inline_html(msg, plain, start + end + 1)
+    m = re.match(r"(\S+)\s*", raw)
+    if not m:
         return None, ""
-    return parts[0].lower(), (parts[1].strip() if len(parts) == 2 else "")
+    return m.group(1).lower(), _inline_html(msg, plain, start + m.end())
 
 
 def _match(text: str, keywords: list[str]):
@@ -123,15 +139,17 @@ def _names(chat_id: int, scope: str) -> list[str]:
     return [r[0] for r in db.query("SELECT name FROM saved WHERE chat_id=? AND scope=? ORDER BY name", (chat_id, scope))]
 
 
-async def _send(msg, chat, user, kind: str, file_id: str, text: str) -> None:
+async def _send(msg, chat, user, kind: str, file_id: str, template: str) -> None:
     """Reply to `msg` with a saved note/filter (sent to the chat if `msg` was deleted meanwhile)."""
-    body = render(text, user, chat) if text else None
+    body, markup = fmt.render(template, user, chat) if template else ("", None)
     if kind == "text":
-        args, kwargs = (body,), {"parse_mode": "HTML"}
+        args, kwargs = (body,), {"parse_mode": "HTML", "reply_markup": markup}
         reply_fn, send_fn = msg.reply_text, msg.chat.send_message
     else:
         args = (file_id,)
-        kwargs = {} if kind == "sticker" else {"caption": body, "parse_mode": "HTML"}
+        kwargs = {"reply_markup": markup}
+        if kind != "sticker":
+            kwargs.update(caption=body or None, parse_mode="HTML")
         reply_fn, send_fn = getattr(msg, f"reply_{kind}"), getattr(msg.chat, f"send_{kind}")
     try:
         try:
@@ -145,19 +163,21 @@ async def _send(msg, chat, user, kind: str, file_id: str, text: str) -> None:
 
 
 async def _store(update: Update, scope: str, name: str, inline: str):
-    """Validate and save. Returns the saved (kind, text) or None after replying with an error."""
+    """Validate and save. Returns (kind, template), or None if there was nothing to save (reply with usage),
+    or "error" after replying with an error."""
     msg = update.effective_message
     chat_id = update.effective_chat.id
     if inline:
-        kind, file_id, text = "text", "", inline
+        kind, file_id, template = "text", "", fmt.capture(inline)
     elif msg.reply_to_message:
-        kind, file_id, text = _extract(msg.reply_to_message)
+        kind, file_id, template = _extract(msg.reply_to_message)
     else:
         return None
-    if kind == "text" and not text.strip():
+    plain = fmt.plain_text(template) if template else ""
+    if kind == "text" and not plain.strip():
         await say(update, "That message has nothing to save.")
         return "error"
-    if len(text) > (MAX_TEXT if kind == "text" else MAX_CAPTION):
+    if len(plain) > (MAX_TEXT if kind == "text" else MAX_CAPTION):
         await say(update, "That text is too long.")
         return "error"
     if _get(chat_id, scope, name) is None and _count(chat_id, scope) >= MAX_ITEMS:
@@ -165,9 +185,9 @@ async def _store(update: Update, scope: str, name: str, inline: str):
         return "error"
     db.execute(
         "INSERT OR REPLACE INTO saved (chat_id, scope, name, kind, file_id, text) VALUES (?, ?, ?, ?, ?, ?)",
-        (chat_id, scope, name, kind, file_id, text),
+        (chat_id, scope, name, kind, file_id, template),
     )
-    return kind, text
+    return kind, template
 
 
 def _in_group(update: Update) -> bool:
@@ -178,13 +198,12 @@ def _in_group(update: Update) -> bool:
 async def save_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await require_admin(update, context):
         return
-    parts = _rest(update.effective_message).split(maxsplit=1)
-    name = parts[0].lower().lstrip("#") if parts else ""
+    name, inline = _parse_name(update.effective_message)
     usage = "Usage: /save [name] [text]\nOr reply to a message (text, photo, sticker...) with /save [name]"
     if not re.fullmatch(r"[^\s#]{1,32}", name):
         await say(update, usage)
         return
-    result = await _store(update, "note", name, parts[1].strip() if len(parts) == 2 else "")
+    result = await _store(update, "note", name, inline)
     if result is None:
         await say(update, usage)
     elif result != "error":
@@ -236,7 +255,7 @@ async def clear_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def filter_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await require_admin(update, context):
         return
-    keyword, inline = _parse_keyword(_rest(update.effective_message))
+    keyword, inline = _parse_keyword(update.effective_message)
     usage = 'Usage: /filter [keyword] [reply]\nFor a phrase use quotes: /filter "good morning" Hello!\nOr reply to a message with /filter [keyword]'
     if not keyword or len(keyword) > 64:
         await say(update, usage)
@@ -262,7 +281,7 @@ async def filters_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 async def stop_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await require_admin(update, context):
         return
-    keyword, _ = _parse_keyword(_rest(update.effective_message))
+    keyword, _ = _parse_keyword(update.effective_message)
     chat_id = update.effective_chat.id
     if not keyword:
         await say(update, 'Usage: /stop [keyword]  (use quotes for phrases: /stop "good morning")')
@@ -314,6 +333,7 @@ async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 def register(app: Application) -> None:
     db.ensure(SCHEMA)
     ui.SECTIONS["notes"] = NOTES_HELP
+    ui.add_section("formatting", "✨ Formatting", fmt.FORMAT_HELP)
 
     app.add_handler(CommandHandler("save", save_cmd))
     app.add_handler(CommandHandler("get", get_cmd))

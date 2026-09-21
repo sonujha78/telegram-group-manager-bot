@@ -4,6 +4,7 @@ Everything is stored per group in SQLite (see db.py).
 """
 import html
 import logging
+import re
 import time
 
 from telegram import (
@@ -24,6 +25,7 @@ from telegram.ext import (
 )
 
 import db
+import fmt
 import ui
 from utils import require_admin, say
 
@@ -72,24 +74,21 @@ _MEMBER_STATUSES = (
 
 # ---------------------------------------------------------------- helpers
 def render(template: str, user, chat) -> str:
-    """Escape the admin's text, then fill in the placeholders."""
-    text = html.escape(template)
-    return (
-        text.replace("{first}", html.escape(user.first_name or "friend"))
-        .replace("{mention}", user.mention_html())
-        .replace("{group}", html.escape(chat.title or "this group"))
-    )
+    """Text of a stored template with the placeholders filled in (buttons are ignored here)."""
+    return fmt.render(template, user, chat)[0]
 
 
-def _text_arg(update: Update) -> str:
-    """Text after the command, or the text of the replied-to message."""
+def _capture_arg(update: Update) -> str:
+    """The template written after the command, or taken from the replied-to message ('' if there is none)."""
     msg = update.effective_message
-    parts = (msg.text or "").split(maxsplit=1)
-    if len(parts) == 2 and parts[1].strip():
-        return parts[1].strip()
+    plain = msg.text or ""
+    m = re.match(r"\S+\s*", plain)  # the command word
+    start = m.end() if m else len(plain)
+    if plain[start:].strip():
+        return fmt.capture(fmt.to_html(plain, msg.entities, start))
     reply = msg.reply_to_message
     if reply and (reply.text or reply.caption):
-        return (reply.text or reply.caption).strip()
+        return fmt.capture(fmt.message_html(reply))
     return ""
 
 
@@ -120,21 +119,23 @@ def _setter(key: str, label: str, cmd: str):
     async def handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not await require_admin(update, context):
             return
-        text = _text_arg(update)
-        if not text:
+        template = _capture_arg(update)
+        plain = fmt.plain_text(template) if template else ""
+        if not plain.strip():
             await say(
                 update,
                 f"Usage: /{cmd} [text]\nYou can also reply to a message with /{cmd}.\n"
-                "Placeholders: {first} {mention} {group}",
+                "Placeholders: {first} {mention} {group}\n"
+                "Bold, links and buttons: see the ✨ Formatting section of /help",
             )
             return
-        if len(text) > MAX_TEXT:
+        if len(plain) > MAX_TEXT:
             await say(update, f"That text is too long (max {MAX_TEXT} characters).")
             return
         chat = update.effective_chat
-        db.set_value(chat.id, key, text)
-        preview = render(text, update.effective_user, chat)
-        await say(update, f"✅ {label} updated. Preview:\n\n{preview}")
+        db.set_value(chat.id, key, template)
+        text, markup = fmt.render(template, update.effective_user, chat)
+        await say(update, f"✅ {label} updated. Preview:\n\n{text}", reply_markup=markup)
 
     return handler
 
@@ -159,20 +160,26 @@ async def rules_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not rules:
         await say(update, "No rules have been set for this group yet.")
         return
-    await say(update, f"📜 <b>Rules of {html.escape(chat.title or 'this group')}</b>\n\n{html.escape(rules)}")
+    text, markup = fmt.render(rules, update.effective_user, chat)
+    await say(update, f"📜 <b>Rules of {html.escape(chat.title or 'this group')}</b>\n\n{text}", reply_markup=markup)
 
 
 async def setrules_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not await require_admin(update, context):
         return
-    text = _text_arg(update)
-    if not text:
-        await say(update, "Usage: /setrules [text]\nYou can also reply to a message with /setrules.")
+    template = _capture_arg(update)
+    plain = fmt.plain_text(template) if template else ""
+    if not plain.strip():
+        await say(
+            update,
+            "Usage: /setrules [text]\nYou can also reply to a message with /setrules.\n"
+            "Bold, links and buttons: see the ✨ Formatting section of /help",
+        )
         return
-    if len(text) > MAX_RULES:
+    if len(plain) > MAX_RULES:
         await say(update, f"The rules are too long (max {MAX_RULES} characters).")
         return
-    db.set_value(update.effective_chat.id, "rules", text)
+    db.set_value(update.effective_chat.id, "rules", template)
     await say(update, "✅ Rules saved. Members can read them with /rules.")
 
 
@@ -316,15 +323,15 @@ async def _restore_pending(context: ContextTypes.DEFAULT_TYPE) -> None:
 async def _send_welcome(context: ContextTypes.DEFAULT_TYPE, chat, user) -> None:
     if not db.get_bool(chat.id, "welcome_on", True):
         return
-    text = render(db.get_value(chat.id, "welcome_text", DEFAULT_WELCOME), user, chat)
-    await _safe_send(context, chat.id, text)
+    text, markup = fmt.render(db.get_value(chat.id, "welcome_text", DEFAULT_WELCOME), user, chat)
+    await _safe_send(context, chat.id, text, reply_markup=markup)
 
 
 async def _send_goodbye(context: ContextTypes.DEFAULT_TYPE, chat, user) -> None:
     if not db.get_bool(chat.id, "goodbye_on", False):
         return
-    text = render(db.get_value(chat.id, "goodbye_text", DEFAULT_GOODBYE), user, chat)
-    await _safe_send(context, chat.id, text)
+    text, markup = fmt.render(db.get_value(chat.id, "goodbye_text", DEFAULT_GOODBYE), user, chat)
+    await _safe_send(context, chat.id, text, reply_markup=markup)
 
 
 def _member_change(cmu: ChatMemberUpdated):
