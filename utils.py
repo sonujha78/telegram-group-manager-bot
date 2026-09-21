@@ -4,7 +4,7 @@ from datetime import timedelta
 
 from telegram import Update
 from telegram.constants import ChatMemberStatus, ChatType, ParseMode
-from telegram.error import TelegramError
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import ContextTypes
 
 import db
@@ -27,8 +27,24 @@ _RIGHT_LABELS = {
 }
 
 
+def reply_target_gone(err: Exception) -> bool:
+    """True for Telegram's 'Message to be replied not found' error (the message was deleted)."""
+    text = str(err).lower()
+    return "replied not found" in text or "reply not found" in text
+
+
+async def reply(message, text: str, **kwargs):
+    """Reply to a message. If it was deleted in the meantime, send the text to the chat instead."""
+    try:
+        return await message.reply_text(text, **kwargs)
+    except BadRequest as e:
+        if not reply_target_gone(e):
+            raise
+        return await message.chat.send_message(text, **kwargs)
+
+
 async def say(update: Update, text: str, **kwargs) -> None:
-    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML, **kwargs)
+    await reply(update.effective_message, text, parse_mode=ParseMode.HTML, **kwargs)
 
 
 async def is_admin(context: ContextTypes.DEFAULT_TYPE, chat_id: int, user_id: int) -> bool:

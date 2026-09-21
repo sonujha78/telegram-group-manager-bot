@@ -11,12 +11,12 @@ import time
 
 from telegram import Update
 from telegram.constants import ChatType
-from telegram.error import TelegramError
+from telegram.error import BadRequest, TelegramError
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 import db
 import ui
-from utils import require_admin, say
+from utils import reply_target_gone, require_admin, say
 from welcome import render
 
 log = logging.getLogger("groupbot.notes")
@@ -124,15 +124,22 @@ def _names(chat_id: int, scope: str) -> list[str]:
 
 
 async def _send(msg, chat, user, kind: str, file_id: str, text: str) -> None:
-    """Reply to `msg` with a saved note/filter."""
+    """Reply to `msg` with a saved note/filter (sent to the chat if `msg` was deleted meanwhile)."""
     body = render(text, user, chat) if text else None
+    if kind == "text":
+        args, kwargs = (body,), {"parse_mode": "HTML"}
+        reply_fn, send_fn = msg.reply_text, msg.chat.send_message
+    else:
+        args = (file_id,)
+        kwargs = {} if kind == "sticker" else {"caption": body, "parse_mode": "HTML"}
+        reply_fn, send_fn = getattr(msg, f"reply_{kind}"), getattr(msg.chat, f"send_{kind}")
     try:
-        if kind == "text":
-            await msg.reply_text(body, parse_mode="HTML")
-        elif kind == "sticker":
-            await msg.reply_sticker(file_id)
-        else:
-            await getattr(msg, f"reply_{kind}")(file_id, caption=body, parse_mode="HTML")
+        try:
+            await reply_fn(*args, **kwargs)
+        except BadRequest as e:
+            if not reply_target_gone(e):
+                raise
+            await send_fn(*args, **kwargs)
     except TelegramError as e:
         log.warning("Could not send saved %s in %s: %s", kind, chat.id, e)
 

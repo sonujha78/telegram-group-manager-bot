@@ -9,6 +9,8 @@ from telegram.constants import ChatType, ParseMode
 from telegram.error import BadRequest
 from telegram.ext import Application, CallbackQueryHandler, CommandHandler, ContextTypes
 
+from utils import reply
+
 # Admin rights pre-selected when someone taps "Add me to a Group".
 ADD_RIGHTS = "change_info+delete_messages+restrict_members+invite_users+pin_messages"
 
@@ -141,7 +143,7 @@ def _screen(key: str, bot):
 async def _group_pointer(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     url = f"https://t.me/{context.bot.username}?start=help"
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("📚 Open commands in private", url=url)]])
-    await update.effective_message.reply_text(
+    await reply(update.effective_message, 
         "👋 I'm up and running! Tap the button to see all my commands.", reply_markup=kb
     )
 
@@ -152,7 +154,7 @@ async def start_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         return
     key = "help" if context.args and context.args[0] == "help" else "home"
     text, markup = _screen(key, context.bot)
-    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+    await reply(update.effective_message, text, parse_mode=ParseMode.HTML, reply_markup=markup)
 
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -160,7 +162,7 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await _group_pointer(update, context)
         return
     text, markup = _screen("help", context.bot)
-    await update.effective_message.reply_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
+    await reply(update.effective_message, text, parse_mode=ParseMode.HTML, reply_markup=markup)
 
 
 async def on_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

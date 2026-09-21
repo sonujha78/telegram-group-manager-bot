@@ -397,7 +397,7 @@ async def report_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     pings = await _admin_pings(context, chat.id)
     text = f"🚨 <b>Report</b> by {html.escape(user.full_name)}\nReported user: {html.escape(target.full_name)}{pings}"
     try:
-        await reported.reply_text(text, parse_mode="HTML")
+        await utils.reply(reported, text, parse_mode="HTML")
     except TelegramError as e:
         log.warning("Could not send report in %s: %s", chat.id, e)
 
